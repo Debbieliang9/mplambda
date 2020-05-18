@@ -9,6 +9,10 @@
 #include <getopt.h>
 #include <optional>
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
 // these static variables are needed by Anna
 ZmqUtil zmq_util;
 ZmqUtilInterface *kZmqUtil = &zmq_util;
@@ -63,8 +67,19 @@ namespace mpl::demo {
         packet::Path<State> packet(cost, elapsedMillis, std::move(path));
         Buffer buf = packet;
         Key k = solutionPathKey;
-        TopKPriorityLattice<double, string, kNumShortestPaths> top_k_priority_lattice(std::set<PriorityValuePair<double, string>>({PriorityValuePair<double, string>(cost, buf.getString())}));
-        string rid = client->put_async(k, serialize(top_k_priority_lattice), LatticeType::TOPK_PRIORITY);
+
+        time_t t = time(0);
+        struct tm *tm;
+  
+        tm = gmtime(&t);
+        strftime(date, sizeof(date), "%Y%m%d", tm);
+
+        // LWWPairLattice<string> lww_lattice = deserialize_lww(serialized);
+        LWWPairLattice<string> lww_lattice(TimestampValuePair<string>(date, buf.getString()));
+        // TopKPriorityLattice<double, string, kNumShortestPaths> top_k_priority_lattice(std::set<PriorityValuePair<double, string>>({PriorityValuePair<double, string>(cost, buf.getString())}));
+        string rid = client->put_async(k, serialize(lww_lattice), LatticeType::LWW);
+        // string rid = client->put_async(k, serialize(top_k_priority_lattice), LatticeType::TOPK_PRIORITY);
+        // TODO: change here and the receive side on Anna
     }
 
 
@@ -149,10 +164,14 @@ namespace mpl::demo {
                         //JI_LOG(INFO) << "received GET response for key " << resp.tuples(0).key() << " with error number " << resp.tuples(0).error();
                         getResponse = true;
                                                 
-                        TopKPriorityLattice<double, string, kNumShortestPaths> top_k_priority_lattice = deserialize_top_k_priority(resp.tuples(0).payload());
-                        JI_LOG(WARN) << "TopK length in lambda_common = " << top_k_priority_lattice.reveal().size();
+                        // TODO: change to LWW and simplify logic here                         
+                        LWWPairLattice<string> lww_lattice = deserialize_lww(resp.tuples(0).payload());
+                        // TopKPriorityLattice<double, string, kNumShortestPaths> top_k_priority_lattice = deserialize_top_k_priority(resp.tuples(0).payload());
+                        JI_LOG(WARN) << "LWW in lambda_common = " << lww_lattice.reveal.size();
+                        // JI_LOG(WARN) << "TopK length in lambda_common = " << top_k_priority_lattice.reveal().size();
 
-                        for (const auto& pv : top_k_priority_lattice.reveal()) {
+
+                        const auto& pv = lww_lattice.reveal();
                           Buffer buf(pv.value);
                           packet::parse(
                               buf,
@@ -177,8 +196,7 @@ namespace mpl::demo {
                                   } else {
                                       JI_LOG(WARN) << "received invalid path type!";
                                   }
-                          });
-                        }
+                          }); 
                     }
                     
                     if (getResponse) {
