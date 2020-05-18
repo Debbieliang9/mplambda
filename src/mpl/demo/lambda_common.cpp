@@ -51,7 +51,7 @@ namespace mpl::demo {
     template <class T, class Rep, class Period>
     void sendPath(
         KvsClient* client, const std::string& solutionPathKey,
-        std::chrono::duration<Rep, Period> elapsed, T& solution) {
+        std::chrono::duration<Rep, Period> elapsed, T& solution, int thread_id) {
         using State = typename T::State;
         using Distance = typename T::Distance;
         
@@ -68,14 +68,8 @@ namespace mpl::demo {
         Buffer buf = packet;
         Key k = solutionPathKey;
 
-        time_t t = time(0);
-        struct tm *tm;
-  
-        tm = gmtime(&t);
-        strftime(date, sizeof(date), "%Y%m%d", tm);
-
         // LWWPairLattice<string> lww_lattice = deserialize_lww(serialized);
-        LWWPairLattice<string> lww_lattice(TimestampValuePair<string>(date, buf.getString()));
+        LWWPairLattice<string> lww_lattice(TimestampValuePair<string>(generate_timestamp(thread_id), buf.getString()));
         // TopKPriorityLattice<double, string, kNumShortestPaths> top_k_priority_lattice(std::set<PriorityValuePair<double, string>>({PriorityValuePair<double, string>(cost, buf.getString())}));
         string rid = client->put_async(k, serialize(lww_lattice), LatticeType::LWW);
         // string rid = client->put_async(k, serialize(top_k_priority_lattice), LatticeType::TOPK_PRIORITY);
@@ -208,7 +202,7 @@ namespace mpl::demo {
                 
                 auto s = planner.solution();
                 if (s < solution) {
-                    sendPath(&kvsClient, solutionPathKey, Clock::now() - start, s);
+                    sendPath(&kvsClient, solutionPathKey, Clock::now() - start, s, thread_id);
                     solution = s;
                     JI_LOG(INFO) << "solution length = " << solution.cost();
                 }
@@ -245,7 +239,7 @@ namespace mpl::demo {
             
         if (auto finalSolution = planner.solution()) {
             if (finalSolution != solution)
-                sendPath(&kvsClient, solutionPathKey, Clock::now() - start, finalSolution);
+                sendPath(&kvsClient, solutionPathKey, Clock::now() - start, finalSolution, thread_id);
                 // sendPath(comm_, Clock::now() - start, finalSolution);
             finalSolution.visit([] (const State& q) { JI_LOG(INFO) << "  " << q; });
         }
